@@ -45,6 +45,7 @@ Emitter(HyperStore.prototype);
  */
 
 HyperStore.prototype.get = function(path, scope, delim) {
+  debug('getting', path);
   return this._map.get(path, scope, delim);
 };
 
@@ -56,6 +57,7 @@ HyperStore.prototype.get = function(path, scope, delim) {
  */
 
 HyperStore.prototype._watch = function(href) {
+  debug('watching', href);
   this._activePaths[href] = true;
   if (this._reqs[href]) return;
   this.size++;
@@ -70,6 +72,7 @@ HyperStore.prototype._watch = function(href) {
  */
 
 HyperStore.prototype._fetch = function(href) {
+  debug('fetching', href);
   var self = this;
   var map = self._map;
 
@@ -85,29 +88,69 @@ HyperStore.prototype._fetch = function(href) {
 };
 
 /**
- * Mark the store as active as notify subscribers
+ * Start the watch cycle
+ *
+ * @return {HyperStore}
+ */
+
+HyperStore.prototype.begin =
+HyperStore.prototype.start = function() {
+  debug('starting cycle');
+  this._needsRefresh = false;
+  this._active = true;
+  this._prevActivePaths = this._activePaths;
+  this._activePaths = {};
+  return this;
+};
+
+/**
+ * End the watch cycle
+ *
+ * @return {HyperStore}
+ */
+
+HyperStore.prototype.end =
+HyperStore.prototype.stop = function() {
+  var self = this;
+  debug('stopping cycle');
+  self._active = false;
+
+  self._clearStalePaths();
+  if (!self._needsRefresh) return self._checkComplete();
+
+  // give any remaining requests a chance to get into the next refresh
+  defer(function() {
+    self._needsRefresh = false;
+    self._changed();
+  });
+
+  return self;
+};
+
+/**
+ * Verify all of the requests have been completed and emit "complete" event
+ *
+ * @api private
+ */
+
+HyperStore.prototype._checkComplete = function() {
+  // TODO make this more robust - it should compare the hrefs
+  if (this.size === this._map.size) this.emit('complete');
+  return this;
+};
+
+/**
+ * Mark the store as dirty and emit a "changed" event
  *
  * @api private
  */
 
 HyperStore.prototype._changed = function() {
-  var self = this;
+  this._needsRefresh = true;
 
-  if (self._active) return self._needsRefresh = true;
-  self._active = true;
-
-  // clients should block until re-rendering is complete
-  self.emit('change');
-  self._clearStalePaths();
-
-  // give any remaining requests a chance to get into the next refresh
-  defer(function() {
-    self._active = false;
-
-    if (!self._needsRefresh) return;
-    self._needsRefresh = false;
-    self._changed();
-  });
+  // only emit the event if the rendering is not active
+  if (!this._active) this.emit('change');
+  return this;
 };
 
 /**
@@ -136,11 +179,6 @@ HyperStore.prototype._clearStalePaths = function() {
 
     map.delete(href);
   }
-
-  self._prevActivePaths = active;
-  self._activePaths = {};
-
-  if (map.size === self.size) self.emit('complete');
 }
 
 /**

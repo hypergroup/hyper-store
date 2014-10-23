@@ -27,16 +27,17 @@ describe('hyper-store', function() {
           name: 'Cameron'
         }
       }, function(store) {
-        var $users = {
+        var scope = {
           users: store.get('.users').value
         };
 
         return [
-          store.get('users.0.name', $users).value,
-          store.get('users.1.name', $users).value,
-          store.get('users.2.name', $users).value
+          store.get('users.0.name', scope).value,
+          store.get('users.1.name', scope).value,
+          store.get('users.2.name', scope).value
         ];
       }, function(err, res) {
+        should.exist(res);
         res.should.eql(['Mike', 'Brannon', 'Cameron']);
         done();
       });
@@ -49,16 +50,19 @@ function testStore(resources, render, cb) {
   var store = new Store(client);
   var res, error;
   store.on('change', function() {
+    store.start();
     try {
       res = render(store);
     } catch (err) {
       error = err;
     }
+    store.stop();
   });
   store.on('complete', function() {
     cb(error, res);
   });
   render(store);
+  return store;
 }
 
 function TestClient(resources) {
