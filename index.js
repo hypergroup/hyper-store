@@ -57,9 +57,9 @@ HyperStore.prototype.get = function(path, scope, delim) {
  */
 
 HyperStore.prototype._watch = function(href) {
-  debug('watching', href);
   this._activePaths[href] = true;
   if (this._reqs[href]) return;
+  debug('watching', href);
   this.size++;
   this._reqs[href] = this._fetch(href) || function() {};
 };
