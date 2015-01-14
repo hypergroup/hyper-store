@@ -2,15 +2,26 @@
  * Module dependencies
  */
 
-var HyperMap = require('hyper-map');
-var debug = require('debug')('hyper-store');
-var Emitter = require('component-emitter');
+var Counter = require('reference-count');
+var Request = require('hyper-path');
+var EventEmitter = require('events').EventEmitter;
+var inherits = require('util').inherits;
+var raf = require('raf');
+var debounce = require('debounce');
 
 /**
  * Expose HyperStore
  */
 
 module.exports = HyperStore;
+
+/**
+ * Define enums
+ */
+
+var ROOT_RESOURCE = '__root__';
+
+function noop() {}
 
 /**
  * Create a HyperStore
@@ -21,18 +32,52 @@ module.exports = HyperStore;
 
 function HyperStore(client, resources) {
   if (!client) throw new Error('A HyperClient must be passed to HyperStore');
-
-  this._activePaths = {};
-  this._prevActivePaths = {};
-
-  this._reqs = {};
-  this.size = 0;
+  EventEmitter.call(this);
   this._client = client;
+  var counter = this._counter = new Counter();
+  counter.on('garbage', this._ongarbage.bind(this));
+  counter.on('resource', this._onresource.bind(this));
 
-  this._map = new HyperMap(resources);
-  this._map.on('request', this._watch.bind(this));
+  this._id = 0;
+  this._callbacks = {};
+  this._errors = {};
+  this._resources = {};
+  this._pending = 0;
+
+  // create a global context for simple cases
+  var context = this._globalContext = this.context(this.emit.bind(this, 'change'));
+  this.start = context.start.bind(context);
+  this.stop = context.stop.bind(context);
 }
-Emitter(HyperStore.prototype);
+inherits(HyperStore, EventEmitter);
+
+/**
+ * Create a child context
+ *
+ * @param {Function} fn
+ * @return {Context}
+ */
+
+
+HyperStore.prototype.context = function(fn) {
+  var counter = this._counter;
+  var id = this._id++
+
+  this._callbacks[id] = debounce(fn, 10);
+
+  var sweep = this._sweep.bind(this, counter, id);
+  var destroy = this._destroy.bind(this, counter, id);
+
+  return new Context(sweep, this._fetch.bind(this), this._setTimeout.bind(this), destroy);
+};
+
+HyperStore.prototype._sweep = function(counter, id) {
+  return counter.sweep(id);
+};
+
+HyperStore.prototype._destroy = function(counter, id) {
+  return counter.destroy(id);
+};
 
 /**
  * Get a value at 'path' in 'scope'
@@ -45,152 +90,161 @@ Emitter(HyperStore.prototype);
  */
 
 HyperStore.prototype.get = function(path, scope, delim) {
-  debug('getting', path);
-  return this._map.get(path, scope, delim);
+  return this._globalContext.req(path, scope, delim);
 };
 
-/**
- * Watch an href
- *
- * @param {String} href
- * @api private
- */
+HyperStore.prototype._fetch = function(path, parent, sweep, delim) {
+  var client = new Client(sweep, this._resources, this._errors);
+  var req = new Request(path, client, delim);
+  req.scope(parent || {});
 
-HyperStore.prototype._watch = function(href) {
-  this._activePaths[href] = true;
-  if (this._reqs[href]) return;
-  debug('watching', href);
-  this.size++;
-  this._reqs[href] = this._fetch(href) || function() {};
-};
+  return req.get(function(err, value) {
+    if (err) throw err;
+    var isLoaded = client.isLoaded;
 
-/**
- * Fetch an href from the HyperClient
- *
- * @param {String} href
- * @api private
- */
-
-HyperStore.prototype._fetch = function(href) {
-  debug('fetching', href);
-  var self = this;
-  var map = self._map;
-
-  return href === '.' ?
-    self._client.root(fn) :
-    self._client.get(href, fn);
-
-  function fn(err, res) {
-    if (err) map.error(href, err);
-    map.set(href, res);
-    self._changed();
-  };
-};
-
-/**
- * Start the watch cycle
- *
- * @return {HyperStore}
- */
-
-HyperStore.prototype.begin =
-HyperStore.prototype.start = function() {
-  debug('starting cycle');
-  this._needsRefresh = false;
-  this._active = true;
-  this._prevActivePaths = this._activePaths;
-  this._activePaths = {};
-  return this;
-};
-
-/**
- * End the watch cycle
- *
- * @return {HyperStore}
- */
-
-HyperStore.prototype.end =
-HyperStore.prototype.stop = function() {
-  var self = this;
-  debug('stopping cycle');
-  self._active = false;
-
-  self._clearStalePaths();
-  if (!self._needsRefresh) return self._checkComplete();
-
-  // give any remaining requests a chance to get into the next refresh
-  defer(function() {
-    self._needsRefresh = false;
-    self._changed();
+    return {
+      completed: isLoaded,
+      isLoaded: isLoaded,
+      request: req,
+      value: value
+    };
   });
-
-  return self;
 };
 
-/**
- * Verify all of the requests have been completed and emit "complete" event
- *
- * @api private
- */
-
-HyperStore.prototype._checkComplete = function() {
-  // TODO make this more robust - it should compare the hrefs
-  if (this.size === this._map.size) this.emit('complete');
-  return this;
-};
-
-/**
- * Mark the store as dirty and emit a "changed" event
- *
- * @api private
- */
-
-HyperStore.prototype._changed = function() {
-  this._needsRefresh = true;
-
-  // only emit the event if the rendering is not active
-  if (!this._active) this.emit('change');
-  return this;
-};
-
-/**
- * Clear any stale HyperClient subscriptions from the previous render
- *
- * @api private
- */
-
-HyperStore.prototype._clearStalePaths = function() {
+HyperStore.prototype._onresource = function(href) {
   var self = this;
-  var active = self._activePaths;
-  var prev = self._prevActivePaths;
-  var reqs = self._reqs;
-  var map = self._map;
+  var errors = self._errors;
+  var resources = self._resources;
+  var client = self._client;
+  var actors = self._counter.actors;
 
-  for (var href in prev) {
-    // the href is still needed
-    if (active[href]) continue;
+  href === ROOT_RESOURCE ?
+    client.root(cb) :
+    client.get(href, cb);
 
-    debug('clearing stale path', href);
+  clearTimeout(self._timeout);
 
-    // unsubscribe from changes to the href
-    reqs[href]();
-    self.size--;
-    delete reqs[href];
+  self._pending++;
 
-    map.delete(href);
+  function cb(err, body) {
+    errors[href] = err;
+    resources[href] = {val: body};
+
+    self._pending--;
+
+    for (var actor in actors) {
+      actors[actor][href] && raf(function() {
+        self._callbacks[this](href, body);
+      }.bind(actor));
+    }
+
+    self.emit('change');
   }
+};
+
+HyperStore.prototype._ongarbage = function(href) {
+  // TODO clear the resource from cache
+  console.log('CLEARING RESOURCE', href);
+};
+
+/**
+ * Not a huge fan of this...
+ */
+
+HyperStore.prototype._setTimeout = function() {
+  var self = this;
+  clearTimeout(self._timeout);
+
+  self._timeout = setTimeout(function() {
+    if (self._pending === 0) self.emit('complete');
+  }, 50);
+};
+
+
+
+
+
+
+function Context(start, fetch, done, destroy) {
+  this._start = start;
+  this._fetch = fetch;
+  this.destroy = destroy;
+  this.done = done;
+  this.get = this.get.bind(this);
+}
+
+Context.prototype.get = function(path, parent, fallback, delim) {
+  var res = this._fetch(path, parent, this._sweep, delim);
+  if (res.isLoaded) return typeof res.value === 'undefined' ? fallback : res.value;
+  this.isLoaded = false;
+  return fallback;
+};
+
+Context.prototype.req = function(path, parent, delim) {
+  var res = this._fetch(path, parent, this._sweep, delim);
+  if (!res.isLoaded) this.isLoaded = false;
+  return res;
+};
+
+Context.prototype.start = function() {
+  this.isLoaded = true;
+  return this._sweep = this._start();
+};
+
+Context.prototype.stop = function() {
+  this._sweep.done();
+  delete this._sweep;
+  this.done();
+  return this.isLoaded;
+};
+
+
+
+
+
+
+
+
+
+/**
+ * Create a synchronous HyperClient
+ */
+
+function Client(sweep, resources, errors) {
+  if (!sweep) throw new Error('the context has not been started');
+  this._sweep = sweep
+  this._resources = resources;
+  this._errors = errors;
+  this.isLoaded = true;
 }
 
 /**
- * Defer execution
+ * Request the root resource
  *
- * @param {Function} fn
+ * @param {Function} cb
  */
 
-function defer(fn) {
-  if (typeof requestAnimationFrame !== 'undefined') return requestAnimationFrame(fn);
-  if (typeof mozRequestAnimationFrame !== 'undefined') return mozRequestAnimationFrame(fn);
-  if (typeof webkitRequestAnimationFrame !== 'undefined') return webkitRequestAnimationFrame(fn);
-  if (typeof setImmediate !== 'undefined') return setImmediate(fn);
-  return setTimeout(fn, 0);
-}
+Client.prototype.root = function(cb) {
+  return this.get(ROOT_RESOURCE, cb);
+};
+
+/**
+ * Request a resource
+ *
+ * @param {String} href
+ * @param {Function} cb
+ */
+
+Client.prototype.get = function(href, cb) {
+  var self = this;
+  self._sweep.count(href);
+
+  var res = self._resources[href];
+  if (res) return cb(null, res.val, null, null, false);
+
+  var err = self._errors[href];
+  if (err) return cb(err);
+
+  this.isLoaded = false;
+  return cb();
+};
