@@ -42,6 +42,7 @@ function HyperStore(client, resources) {
   this._callbacks = {};
   this._errors = {};
   this._resources = {};
+  this._subs = {};
   this._pending = 0;
 
   // create a global context for simple cases
@@ -61,7 +62,7 @@ inherits(HyperStore, EventEmitter);
 
 HyperStore.prototype.context = function(fn) {
   var counter = this._counter;
-  var id = this._id++
+  var id = this._id++;
 
   this._callbacks[id] = debounce(fn, 10);
 
@@ -118,7 +119,7 @@ HyperStore.prototype._onresource = function(href) {
   var client = self._client;
   var actors = self._counter.actors;
 
-  href === ROOT_RESOURCE ?
+  self._subs[href] = href === ROOT_RESOURCE ?
     client.root(cb) :
     client.get(href, cb);
 
@@ -143,8 +144,9 @@ HyperStore.prototype._onresource = function(href) {
 };
 
 HyperStore.prototype._ongarbage = function(href) {
-  // TODO clear the resource from cache
-  console.log('CLEARING RESOURCE', href);
+  var self = this;
+  delete self._resources[href];
+  if (self._subs[href]) self._subs[href]();
 };
 
 /**
