@@ -102,7 +102,6 @@ HyperStore.prototype._fetch = function(path, parent, sweep, delim) {
   return req.get(function(err, value) {
     if (err) throw err;
     var isLoaded = client.isLoaded;
-
     return {
       completed: isLoaded,
       isLoaded: isLoaded,
@@ -129,7 +128,7 @@ HyperStore.prototype._onresource = function(href) {
 
   function cb(err, body) {
     errors[href] = err;
-    resources[href] = {val: body};
+    resources[href] = {value: body};
 
     self._pending--;
 
@@ -146,7 +145,10 @@ HyperStore.prototype._onresource = function(href) {
 HyperStore.prototype._ongarbage = function(href) {
   var self = this;
   delete self._resources[href];
-  if (self._subs[href]) self._subs[href]();
+  delete self._callbacks[href];
+  var sub = self._subs[href];
+  if (typeof sub === 'function') sub();
+  delete self._subs[href];
 };
 
 /**
@@ -214,7 +216,7 @@ Context.prototype.stop = function() {
 
 function Client(sweep, resources, errors) {
   if (!sweep) throw new Error('the context has not been started');
-  this._sweep = sweep
+  this._sweep = sweep;
   this._resources = resources;
   this._errors = errors;
   this.isLoaded = true;
@@ -242,7 +244,7 @@ Client.prototype.get = function(href, cb) {
   self._sweep.count(href);
 
   var res = self._resources[href];
-  if (res) return cb(null, res.val, null, null, false);
+  if (res) return cb(null, res.value, null, null, false);
 
   var err = self._errors[href];
   if (err) return cb(err);
