@@ -32,18 +32,23 @@ function noop() {}
 
 function HyperStore(client, resources) {
   if (!client) throw new Error('A HyperClient must be passed to HyperStore');
-  EventEmitter.call(this);
+  var self = this;
+  EventEmitter.call(self);
   this._client = client;
-  var counter = this._counter = new Counter();
-  counter.on('garbage', this._ongarbage.bind(this));
-  counter.on('resource', this._onresource.bind(this));
+  var counter = self._counter = new Counter();
+  counter.on('garbage', self._ongarbage.bind(self));
+  counter.on('resource', self._onresource.bind(self));
 
-  this._id = 0;
-  this._callbacks = {};
-  this._errors = {};
-  this._resources = {};
-  this._subs = {};
-  this._pending = 0;
+  self._id = 0;
+  self._callbacks = {};
+  self._errors = {};
+  self._resources = {};
+  self._subs = {};
+  self._pending = 0;
+  self._garbage = {};
+  self._interval = setInterval(function() {
+    self.gc();
+  }, 1000);
 
   // create a global context for simple cases
   var context = this._globalContext = this.context(this.emit.bind(this, 'change'));
@@ -118,6 +123,11 @@ HyperStore.prototype._onresource = function(href) {
   var client = self._client;
   var actors = self._counter.actors;
 
+  if (self._garbage[href]) {
+    delete self._garbage[href];
+    return;
+  }
+
   self._subs[href] = href === ROOT_RESOURCE ?
     client.root(cb) :
     client.get(href, cb);
@@ -143,6 +153,21 @@ HyperStore.prototype._onresource = function(href) {
 };
 
 HyperStore.prototype._ongarbage = function(href) {
+  this._garbage[href] = 1;
+};
+
+HyperStore.prototype.gc = function() {
+  var self = this;
+  var garbage = self._garbage;
+  if (!garbage.length) return self;
+  for (var k in garbage) {
+    self.gcResource(k);
+  }
+  self._garbage = {};
+  return self;
+};
+
+HyperStore.prototype.gcResource = function(href) {
   var self = this;
   delete self._resources[href];
   delete self._callbacks[href];
