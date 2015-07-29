@@ -43,6 +43,7 @@ function HyperStore(client, resources) {
   self._callbacks = {};
   self._errors = {};
   self._resources = {};
+  self._protoMap = {};
   self._subs = {};
   self._pending = 0;
   self._garbage = {};
@@ -100,7 +101,7 @@ HyperStore.prototype.get = function(path, scope, delim) {
 };
 
 HyperStore.prototype._fetch = function(path, parent, sweep, delim) {
-  var client = new Client(sweep, this._resources, this._errors);
+  var client = new Client(sweep, this._resources, this._errors, this._protoMap);
   var req = new Request(path, client, delim);
   req.scope(parent || {});
 
@@ -128,9 +129,11 @@ HyperStore.prototype._onresource = function(href) {
     return;
   }
 
+  var withProto = self._protoMap[href];
+
   self._subs[href] = href === ROOT_RESOURCE ?
     client.root(cb) :
-    client.get(href, cb);
+    client.get(withProto, cb);
 
   clearTimeout(self._timeout);
 
@@ -144,7 +147,7 @@ HyperStore.prototype._onresource = function(href) {
 
     for (var actor in actors) {
       actors[actor][href] && raf(function() {
-        self._callbacks[this](href, body);
+        self._callbacks[this](withProto, body);
       }.bind(actor));
     }
 
@@ -174,6 +177,8 @@ HyperStore.prototype.gcResource = function(href) {
   var sub = self._subs[href];
   if (typeof sub === 'function') sub();
   delete self._subs[href];
+  delete self._protoMap[href];
+  delete self._errors[href];
 };
 
 /**
@@ -239,11 +244,12 @@ Context.prototype.stop = function() {
  * Create a synchronous HyperClient
  */
 
-function Client(sweep, resources, errors) {
+function Client(sweep, resources, errors, protoMap) {
   if (!sweep) throw new Error('the context has not been started');
   this._sweep = sweep;
   this._resources = resources;
   this._errors = errors;
+  this._protoMap = protoMap;
   this.isLoaded = true;
 }
 
@@ -266,12 +272,15 @@ Client.prototype.root = function(cb) {
 
 Client.prototype.get = function(href, cb) {
   var self = this;
-  self._sweep.count(href);
+  var withoutProto = (href || '').replace(/^[^:]+:/, '');
+  self._protoMap[withoutProto] = self._protoMap[withoutProto] || href;
 
-  var res = self._resources[href];
+  self._sweep.count(withoutProto);
+
+  var res = self._resources[withoutProto];
   if (res) return cb(null, res.value, null, null, false);
 
-  var err = self._errors[href];
+  var err = self._errors[withoutProto];
   if (err) return cb(err);
 
   this.isLoaded = false;

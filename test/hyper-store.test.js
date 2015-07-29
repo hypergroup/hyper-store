@@ -11,7 +11,7 @@ describe('hyper-store', function() {
   beforeEach(function() {
     // if (store) store.destroy();
     // TODO add client
-    store = new Store(new Client('https://app.qzzr.com/api/hyper'));
+    store = new Store(new Client('https://api.movementventures.com'));
   });
 
   it('should work with a single context', function(done) {
