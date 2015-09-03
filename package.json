@@ -17,7 +17,7 @@
     "should": "^4.0.4"
   },
   "scripts": {
-    "test": "NODE_ENV=test ./node_modules/.bin/mocha"
+    "test": "NODE_ENV=test ./node_modules/.bin/mocha -t 60000"
   },
   "keywords": [
     "hyper",

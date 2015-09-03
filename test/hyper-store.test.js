@@ -6,12 +6,14 @@ var should = require('should');
 var Store = require('..');
 var Client = require('hyper-client-superagent');
 
+var root = 'http://class-roll.mazurka.io';
+
 describe('hyper-store', function() {
   var store;
   beforeEach(function() {
     // if (store) store.destroy();
     // TODO add client
-    store = new Store(new Client('https://api.movementventures.com'));
+    store = new Store(new Client(root));
   });
 
   it('should work with a single context', function(done) {
@@ -22,11 +24,11 @@ describe('hyper-store', function() {
     });
 
     var res = createContext(store, function(context) {
-      var quiz = context.get('.quizzes.trending.0');
+      var clas = context.get('.classes');
 
       return {
-        title: context.get('title', quiz),
-        author: context.get('author.display_name', quiz)
+        length: context.get('length', clas),
+        name: context.get('0.name', clas)
       };
     });
   });
@@ -41,21 +43,37 @@ describe('hyper-store', function() {
     });
 
     var res1 = createContext(store, function(context) {
-      return context.get('.quizzes.trending', null, []).map(function(quiz) {
-        return context.get('title', quiz);
+      return context.get('.classes', null, []).map(function(clas) {
+        return context.get('name', clas);
       });
     });
 
     var res2 = createContext(store, function(context) {
-      return context.get('.quizzes.trending', null, []).map(function(quiz) {
-        return context.get('author.display_name', quiz);
+      return context.get('.classes', null, []).map(function(clas) {
+        return context.get('name', clas);
       });
     });
 
     var res3 = createContext(store, function(context) {
-      return context.get('.quizzes.personality', null, []).map(function(quiz) {
-        return context.get('title', quiz);
+      return context.get('.classes', null, []).map(function(clas) {
+        return context.get('name', clas);
       });
+    });
+  });
+
+  it('should support getAsync', function(done) {
+    store.getAsync({
+      name_str: '.classes.0.name',
+      name_fn: function($get) {
+        return $get('.classes.0.name');
+      },
+      name_arr: [{href: root}, 'classes', '0', 'name']
+    }, function(err, data) {
+      if (err) return done(err);
+      data.should.have.property('name_str');
+      data.should.have.property('name_fn');
+      data.should.have.property('name_arr');
+      done();
     });
   });
 });

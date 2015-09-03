@@ -8,18 +8,14 @@ var EventEmitter = require('events').EventEmitter;
 var inherits = require('util').inherits;
 var raf = require('raf');
 var debounce = require('debounce');
+var Client = require('./lib/client');
+var Context = require('./lib/context');
 
 /**
  * Expose HyperStore
  */
 
 module.exports = HyperStore;
-
-/**
- * Define enums
- */
-
-var ROOT_RESOURCE = '__root__';
 
 function noop() {}
 
@@ -64,7 +60,6 @@ inherits(HyperStore, EventEmitter);
  * @param {Function} fn
  * @return {Context}
  */
-
 
 HyperStore.prototype.context = function(fn) {
   var counter = this._counter;
@@ -131,7 +126,7 @@ HyperStore.prototype._onresource = function(href) {
 
   var withProto = self._protoMap[href];
 
-  self._subs[href] = href === ROOT_RESOURCE ?
+  self._subs[href] = href === Client.ROOT_RESOURCE ?
     client.root(cb) :
     client.get(withProto, cb);
 
@@ -194,95 +189,46 @@ HyperStore.prototype._setTimeout = function() {
   }, 50);
 };
 
+/**
+ * Get an object async
+ */
 
+HyperStore.prototype.getAsync = function(obj, cb) {
+  var keys = Object.keys(obj);
 
+  function render() {
+    store.start();
 
+    try {
+      var target = fetchTemplate(keys, obj, store.get);
+    } catch (err) {
+      return cb(err);
+    }
 
+    if (!store.stop()) return;
+    store.destroy();
 
-function Context(start, fetch, done, destroy) {
-  this._start = start;
-  this._fetch = fetch;
-  this.destroy = destroy;
-  this.done = done;
-  this.get = this.get.bind(this);
+    cb(null, target);
+  };
+
+  var store = this.context(render);
+  render();
+};
+
+function fetchTemplate(keys, obj, $get) {
+  var target = {};
+
+  for (var i = 0, v, k; i < keys.length; i++) {
+    k = keys[i];
+    v = obj[k];
+    if (typeof v === 'function') {
+      target[k] = v($get);
+      continue;
+    }
+
+    if (typeof v === 'string') v = v.split('.');
+    target[k] = !v[0] ? $get(v) : $get(v.slice(1), v[0]);
+  };
+
+  return target;
 }
-
-Context.prototype.get = function(path, parent, fallback, delim) {
-  var res = this._fetch(path, parent, this._sweep, delim);
-  if (res.isLoaded) return typeof res.value === 'undefined' ? fallback : res.value;
-  this.isLoaded = false;
-  return fallback;
-};
-
-Context.prototype.req = function(path, parent, delim) {
-  var res = this._fetch(path, parent, this._sweep, delim);
-  if (!res.isLoaded) this.isLoaded = false;
-  return res;
-};
-
-Context.prototype.start = function() {
-  this.isLoaded = true;
-  return this._sweep = this._start();
-};
-
-Context.prototype.stop = function() {
-  this._sweep.done();
-  delete this._sweep;
-  this.done();
-  return this.isLoaded;
-};
-
-
-
-
-
-
-
-
-
-/**
- * Create a synchronous HyperClient
- */
-
-function Client(sweep, resources, errors, protoMap) {
-  if (!sweep) throw new Error('the context has not been started');
-  this._sweep = sweep;
-  this._resources = resources;
-  this._errors = errors;
-  this._protoMap = protoMap;
-  this.isLoaded = true;
-}
-
-/**
- * Request the root resource
- *
- * @param {Function} cb
- */
-
-Client.prototype.root = function(cb) {
-  return this.get(ROOT_RESOURCE, cb);
-};
-
-/**
- * Request a resource
- *
- * @param {String} href
- * @param {Function} cb
- */
-
-Client.prototype.get = function(href, cb) {
-  var self = this;
-  var withoutProto = (href || '').replace(/^[^:]+:/, '');
-  self._protoMap[withoutProto] = self._protoMap[withoutProto] || href;
-
-  self._sweep.count(withoutProto);
-
-  var res = self._resources[withoutProto];
-  if (res) return cb(null, res.value, null, null, false);
-
-  var err = self._errors[withoutProto];
-  if (err) return cb(err);
-
-  this.isLoaded = false;
-  return cb();
-};
