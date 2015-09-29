@@ -95,6 +95,17 @@ HyperStore.prototype.get = function(path, scope, delim) {
   return this._globalContext.req(path, scope, delim);
 };
 
+/**
+ * Reload an href in the store
+ */
+
+HyperStore.prototype.reload = function(href) {
+  var self = this;
+  if (self._garbage[href]) return;
+  if (self._client.clear) return self._client.clear(href, function() {self._onresource(href)});
+  self._onresource(href);
+};
+
 HyperStore.prototype._fetch = function(path, parent, sweep, delim) {
   var client = new Client(sweep, this._resources, this._errors, this._protoMap);
   var req = new Request(path, client, delim);
@@ -124,7 +135,7 @@ HyperStore.prototype._onresource = function(href) {
     return;
   }
 
-  var withProto = self._protoMap[href];
+  var withProto = self._protoMap[href] || href;
 
   self._subs[href] = href === Client.ROOT_RESOURCE ?
     client.root(cb) :

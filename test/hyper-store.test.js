@@ -13,7 +13,11 @@ describe('hyper-store', function() {
   beforeEach(function() {
     // if (store) store.destroy();
     // TODO add client
-    store = new Store(new Client(root));
+    var client = new Client(root);
+    client.use(function(req) {
+      console.log(req.method, req.url);
+    });
+    store = new Store(client);
   });
 
   it('should work with a single context', function(done) {
@@ -23,12 +27,12 @@ describe('hyper-store', function() {
       done();
     });
 
-    var res = createContext(store, function(context) {
-      var clas = context.get('.classes');
+    var res = createContext(store, function($get) {
+      var clas = $get('.classes');
 
       return {
-        length: context.get('length', clas),
-        name: context.get('0.name', clas)
+        length: $get('length', clas),
+        name: $get('0.name', clas)
       };
     });
   });
@@ -42,21 +46,21 @@ describe('hyper-store', function() {
       done();
     });
 
-    var res1 = createContext(store, function(context) {
-      return context.get('.classes', null, []).map(function(clas) {
-        return context.get('name', clas);
+    var res1 = createContext(store, function($get) {
+      return $get('.classes', null, []).map(function(clas) {
+        return $get('name', clas);
       });
     });
 
-    var res2 = createContext(store, function(context) {
-      return context.get('.classes', null, []).map(function(clas) {
-        return context.get('name', clas);
+    var res2 = createContext(store, function($get) {
+      return $get('.classes', null, []).map(function(clas) {
+        return $get('name', clas);
       });
     });
 
-    var res3 = createContext(store, function(context) {
-      return context.get('.classes', null, []).map(function(clas) {
-        return context.get('name', clas);
+    var res3 = createContext(store, function($get) {
+      return $get('.classes', null, []).map(function(clas) {
+        return $get('name', clas);
       });
     });
   });
@@ -76,6 +80,25 @@ describe('hyper-store', function() {
       done();
     });
   });
+
+  it('should support reloading resources', function(done) {
+    var hasReloaded = false;
+
+    var res = createContext(store, function($get) {
+      var clas = $get('.classes.0');
+      $get('name', clas);
+
+      // we've successfully reloaded the href
+      if (hasReloaded) return done();
+
+      // still waiting on data
+      if (!clas) return;
+
+      // we've got the data; let's schedule a refresh
+      hasReloaded = true;
+      return store.reload(clas.href);
+    });
+  });
 });
 
 function createContext(store, render) {
@@ -87,7 +110,7 @@ function createContext(store, render) {
 
   function exec() {
     context.start();
-    var out = res.value = render(context);
+    var out = res.value = render(context.get, context);
     res.times++;
     context.stop();
     return out;
