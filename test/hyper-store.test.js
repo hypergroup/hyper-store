@@ -81,6 +81,18 @@ describe('hyper-store', function() {
     });
   });
 
+  it('should support getAsync functions', function(done) {
+    store.getAsync(function($get) {
+      return $get('.classes', null, []).map(function(c) {
+        return $get('name', c);
+      });
+    }, function(err, data) {
+      if (err) return done(err);
+      data.length.should.be.above(1);
+      done();
+    })
+  })
+
   it('should support reloading resources', function(done) {
     var hasReloaded = false;
 

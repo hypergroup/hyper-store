@@ -204,25 +204,29 @@ HyperStore.prototype._setTimeout = function() {
  * Get an object async
  */
 
-HyperStore.prototype.getAsync = function(obj, cb) {
-  var keys = Object.keys(obj);
+HyperStore.prototype.getAsync = function(renderFn, cb) {
+  if (typeof renderFn === 'object') {
+    renderFn = fetchTemplate.bind(null, Object.keys(renderFn), renderFn);
+  }
+
+  var called = false;
 
   function render() {
-    store.start();
-
+    context.start();
     try {
-      var target = fetchTemplate(keys, obj, store.get);
+      var res = renderFn(context.get, context);
     } catch (err) {
       return cb(err);
     }
 
-    if (!store.stop()) return;
-    store.destroy();
+    if (!context.stop() || called) return;
+    called = true;
+    context.destroy();
 
-    cb(null, target);
-  };
+    cb(null, res);
+  }
 
-  var store = this.context(render);
+  var context = this.context(render);
   render();
 };
 
