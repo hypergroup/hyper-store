@@ -8,6 +8,7 @@ var EventEmitter = require('events').EventEmitter;
 var inherits = require('util').inherits;
 var raf = require('raf');
 var debounce = require('debounce');
+var now = require('performance-now');
 var Client = require('./lib/client');
 var Context = require('./lib/context');
 
@@ -137,6 +138,8 @@ HyperStore.prototype._onresource = function(href) {
 
   var withProto = self._protoMap[href] || href;
 
+  var begin = now();
+
   self._subs[href] = href === Client.ROOT_RESOURCE ?
     client.root(cb) :
     client.get(withProto, cb);
@@ -146,6 +149,8 @@ HyperStore.prototype._onresource = function(href) {
   self._pending++;
 
   function cb(err, body) {
+    var time = now() - begin;
+
     errors[href] = err;
     resources[href] = {value: body};
 
@@ -157,7 +162,7 @@ HyperStore.prototype._onresource = function(href) {
       }.bind(actor));
     }
 
-    self.emit('change');
+    self.emit('change', withProto, time, err);
   }
 };
 
