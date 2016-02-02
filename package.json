@@ -1,6 +1,6 @@
 {
   "name": "hyper-store",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Flux-style store for hyper resources",
   "main": "index.js",
   "dependencies": {
