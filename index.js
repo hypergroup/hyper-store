@@ -16,7 +16,8 @@ var Context = require('./lib/context');
  * Expose HyperStore
  */
 
-module.exports = HyperStore;
+exports = module.exports = HyperStore;
+exports['default'] = exports;
 
 function noop() {}
 
